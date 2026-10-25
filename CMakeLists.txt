@@ -3,6 +3,12 @@ cmake_minimum_required(VERSION 3.10)
 # Set the project name
 project(saxpy-optimization)
 
+# Default to an optimized build. Without a build type CMake passes no -O flag,
+# so the scalar loops would be measured at -O0.
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)

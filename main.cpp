@@ -17,7 +17,21 @@ using Aligned64FloatVector = std::vector<float, AlignedAllocator<float, 64>>;
 
 namespace bm = benchmark;
 
-constexpr long int N = 1e8;
+// Each benchmark runs at two array sizes:
+// - 2048 floats (8 KiB per array): x and y both fit in the 32 KiB L1 data cache.
+// - 100 million floats (400 MB per array): far larger than any cache, so data streams from DRAM.
+constexpr long int kL1Size = 2048;
+constexpr long int kDramSize = 100'000'000;
+
+#define SAXPY_BENCHMARK(fn) \
+  BENCHMARK(fn)->Arg(kL1Size)->Arg(kDramSize)->Repetitions(5)->DisplayAggregatesOnly(true)
+
+// SAXPY does 2 flops (multiply + add) and moves 12 bytes (load x, load y, store y) per element.
+void set_counters(bm::State& state, size_t n) {
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations() * n * 3 * sizeof(float)));
+  state.counters["FLOPS"] =
+      bm::Counter(2.0 * static_cast<double>(n) * state.iterations(), bm::Counter::kIsRate);
+}
 
 template <typename T = std::vector<float>>
 T generate_random_values(int low, int high, unsigned long n) {
@@ -28,7 +42,8 @@ T generate_random_values(int low, int high, unsigned long n) {
 
   std::uniform_real_distribution<float> dist(low, high);
 
-  T random_values(n);
+  T random_values;
+  random_values.reserve(n);
 
   for (size_t i = 0; i < n; ++i) {
     random_values.emplace_back(dist(e1));
@@ -63,8 +78,9 @@ void saxpy_aligned_restrict(const float& alpha, const T* __restrict x, const siz
 }
 
 static void BM_aligned32(bm::State& state) {
-  const auto x = generate_random_values<Aligned32FloatVector>(0, 10, N);
-  auto y = generate_random_values<Aligned32FloatVector>(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values<Aligned32FloatVector>(0, 10, n);
+  auto y = generate_random_values<Aligned32FloatVector>(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -73,11 +89,13 @@ static void BM_aligned32(bm::State& state) {
     saxpy_aligned<Aligned32FloatVector>(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 static void BM_aligned64(bm::State& state) {
-  const auto x = generate_random_values<Aligned64FloatVector>(0, 10, N);
-  auto y = generate_random_values<Aligned64FloatVector>(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values<Aligned64FloatVector>(0, 10, n);
+  auto y = generate_random_values<Aligned64FloatVector>(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -86,11 +104,13 @@ static void BM_aligned64(bm::State& state) {
     saxpy_aligned<Aligned64FloatVector>(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 static void BM_aligned64_restrict(bm::State& state) {
-  const auto x = generate_random_values<Aligned64FloatVector>(0, 10, N);
-  auto y = generate_random_values<Aligned64FloatVector>(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values<Aligned64FloatVector>(0, 10, n);
+  auto y = generate_random_values<Aligned64FloatVector>(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -99,6 +119,7 @@ static void BM_aligned64_restrict(bm::State& state) {
     saxpy_aligned_restrict<float>(alpha, x.data(), x.size(), y.data(), y.size());
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_multiple_8(const float& alpha, const std::vector<float>& x, std::vector<float>& y) {
@@ -123,8 +144,9 @@ void saxpy_naive(const float& alpha, const std::vector<float>& x, std::vector<fl
 }
 
 static void BM_naive(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -133,6 +155,7 @@ static void BM_naive(bm::State& state) {
     saxpy_naive(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_restrict(const float& alpha, const float* __restrict x, const size_t size_x,
@@ -145,8 +168,9 @@ void saxpy_restrict(const float& alpha, const float* __restrict x, const size_t 
 }
 
 static void BM_restrict(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -155,11 +179,13 @@ static void BM_restrict(bm::State& state) {
     saxpy_restrict(alpha, x.data(), x.size(), y.data(), y.size());
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 static void BM_multiple_8(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -168,6 +194,7 @@ static void BM_multiple_8(bm::State& state) {
     saxpy_multiple_8(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_avx2(float alpha, const float* __restrict x, float* __restrict y, size_t n) {
@@ -191,16 +218,18 @@ void saxpy_avx2(float alpha, const float* __restrict x, float* __restrict y, siz
 }
 
 static void BM_avx2(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
 
   for (auto _ : state) {
-    saxpy_avx2(alpha, x.data(), y.data(), N);
+    saxpy_avx2(alpha, x.data(), y.data(), x.size());
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_avx2_prefetch(float alpha, const float* __restrict x, float* __restrict y, size_t n,
@@ -231,42 +260,48 @@ void saxpy_avx2_prefetch(float alpha, const float* __restrict x, float* __restri
 }
 
 static void BM_avx2_prefetch64(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
 
   for (auto _ : state) {
-    saxpy_avx2_prefetch(alpha, x.data(), y.data(), N);
+    saxpy_avx2_prefetch(alpha, x.data(), y.data(), x.size());
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 static void BM_avx2_prefetch128(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
 
   for (auto _ : state) {
-    saxpy_avx2_prefetch(alpha, x.data(), y.data(), N, 128);
+    saxpy_avx2_prefetch(alpha, x.data(), y.data(), x.size(), 128);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 static void BM_avx2_prefetch256(bm::State& state) {
-  const auto x = generate_random_values(0, 10, N);
-  auto y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const auto x = generate_random_values(0, 10, n);
+  auto y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
 
   for (auto _ : state) {
-    saxpy_avx2_prefetch(alpha, x.data(), y.data(), N, 256);
+    saxpy_avx2_prefetch(alpha, x.data(), y.data(), x.size(), 256);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_loop_unroll_2(const float& alpha, const std::vector<float>& x, std::vector<float>& y) {
@@ -283,8 +318,9 @@ void saxpy_loop_unroll_2(const float& alpha, const std::vector<float>& x, std::v
 }
 
 static void BM_loop_unroll_2(bm::State& state) {
-  const std::vector<float> x = generate_random_values(0, 10, N);
-  std::vector<float> y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const std::vector<float> x = generate_random_values(0, 10, n);
+  std::vector<float> y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -293,6 +329,7 @@ static void BM_loop_unroll_2(bm::State& state) {
     saxpy_loop_unroll_2(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_loop_unroll_4(const float& alpha, const std::vector<float>& x, std::vector<float>& y) {
@@ -311,8 +348,9 @@ void saxpy_loop_unroll_4(const float& alpha, const std::vector<float>& x, std::v
 }
 
 static void BM_loop_unroll_4(bm::State& state) {
-  const std::vector<float> x = generate_random_values(0, 10, N);
-  std::vector<float> y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const std::vector<float> x = generate_random_values(0, 10, n);
+  std::vector<float> y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -321,6 +359,7 @@ static void BM_loop_unroll_4(bm::State& state) {
     saxpy_loop_unroll_4(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
 void saxpy_loop_unroll_8(const float& alpha, const std::vector<float>& x, std::vector<float>& y) {
@@ -343,8 +382,9 @@ void saxpy_loop_unroll_8(const float& alpha, const std::vector<float>& x, std::v
 }
 
 static void BM_loop_unroll_8(bm::State& state) {
-  const std::vector<float> x = generate_random_values(0, 10, N);
-  std::vector<float> y = generate_random_values(0, 10, N);
+  const size_t n = state.range(0);
+  const std::vector<float> x = generate_random_values(0, 10, n);
+  std::vector<float> y = generate_random_values(0, 10, n);
   // Make alpha random to prevent compiler from optimizing for a particular
   // alpha
   const float alpha = generate_random_values(0, 10, 1)[0];
@@ -353,20 +393,21 @@ static void BM_loop_unroll_8(bm::State& state) {
     saxpy_loop_unroll_8(alpha, x, y);
     bm::DoNotOptimize(y);
   }
+  set_counters(state, n);
 }
 
-BENCHMARK(BM_naive)->Repetitions(4);
-BENCHMARK(BM_restrict)->Repetitions(4);
-BENCHMARK(BM_avx2)->Repetitions(4);
-BENCHMARK(BM_avx2_prefetch64)->Repetitions(4);
-BENCHMARK(BM_avx2_prefetch128)->Repetitions(4);
-BENCHMARK(BM_avx2_prefetch256)->Repetitions(4);
-BENCHMARK(BM_multiple_8)->Repetitions(4);
-BENCHMARK(BM_aligned32)->Repetitions(4);
-BENCHMARK(BM_aligned64)->Repetitions(4);
-BENCHMARK(BM_aligned64_restrict)->Repetitions(4);
-BENCHMARK(BM_loop_unroll_2)->Repetitions(2);
-BENCHMARK(BM_loop_unroll_4)->Repetitions(2);
-BENCHMARK(BM_loop_unroll_8)->Repetitions(2);
+SAXPY_BENCHMARK(BM_naive);
+SAXPY_BENCHMARK(BM_restrict);
+SAXPY_BENCHMARK(BM_avx2);
+SAXPY_BENCHMARK(BM_avx2_prefetch64);
+SAXPY_BENCHMARK(BM_avx2_prefetch128);
+SAXPY_BENCHMARK(BM_avx2_prefetch256);
+SAXPY_BENCHMARK(BM_multiple_8);
+SAXPY_BENCHMARK(BM_aligned32);
+SAXPY_BENCHMARK(BM_aligned64);
+SAXPY_BENCHMARK(BM_aligned64_restrict);
+SAXPY_BENCHMARK(BM_loop_unroll_2);
+SAXPY_BENCHMARK(BM_loop_unroll_4);
+SAXPY_BENCHMARK(BM_loop_unroll_8);
 
 BENCHMARK_MAIN();
