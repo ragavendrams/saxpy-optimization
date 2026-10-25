@@ -44,4 +44,4 @@ GFLOP/s counts 2 flops per element (multiply and add). GiB/s counts 12 bytes per
 - **Software prefetch only adds instructions:** slower in L1, no gain from DRAM, because the hardware prefetcher already handles a linear stream.
 - **Unroll by 8 ran at scalar speed in L1.** The binary contains a vectorized version of that loop, but this run appears to use the scalar fallback. Not investigated further.
 
-The Ubuntu `libbenchmark` package prints "Library was built as DEBUG". That refers to the benchmark library itself; the measured loops are built with `-O3`.
+The measured loops are built with `-O3`.
